@@ -5,13 +5,6 @@ on:
     - cron: '*/30 * * * *'
   workflow_dispatch:
 
-env:
-  SMTP_HOST: ${{ secrets.SMTP_HOST }}
-  SMTP_PORT: ${{ secrets.SMTP_PORT }}
-  EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-  EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-  EMAIL_TO: ${{ secrets.EMAIL_TO }}
-
 jobs:
   check-status:
     runs-on: ubuntu-latest
@@ -28,9 +21,3 @@ jobs:
 
       - name: Run status check
         run: python status_check.py
-        env:
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-          EMAIL_TO: ${{ secrets.EMAIL_TO }}

@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
 """
-WhatsApp Business API Status Monitor
-Runs via GitHub Actions (every 30 min) - sends email only on status changes.
+WhatsApp Business API Status Monitor - Server Edition
+For running on a cloud server (DigitalOcean, Vultr, AWS, etc.)
+Sends email only on status changes.
 """
 
 import json
 import re
 import smtplib
-import os
+import requests
 from datetime import datetime
 from pathlib import Path
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass
 
-STATE_FILE = Path("/tmp/whatsapp_state.json")
-CONFIG_FILE = Path("/tmp/whatsapp_config.json")
+STATE_FILE = Path("/var/whatsapp_monitor/state.json")
+CONFIG_FILE = Path("/var/whatsapp_monitor/config.json")
 
 @dataclass
 class StatusData:
@@ -23,39 +24,41 @@ class StatusData:
     overall: str
     components: dict
 
-class Config:
-    def __init__(self):
-        self.host = os.environ.get('SMTP_HOST') or 'smtp.gmail.com'
-        self.port = int(os.environ.get('SMTP_PORT') or '587')
-        self.email_from = os.environ.get('EMAIL_FROM') or 'mohdalizahoor@gmail.com'
-        self.email_password = os.environ.get('EMAIL_PASSWORD') or 'qlwb lerb nwom owna'
-        self.email_to = os.environ.get('EMAIL_TO') or 'mohdalizahoor@gmail.com'
-    
-    def is_configured(self):
-        return all([self.host, self.email_from, self.email_password, self.email_to])
-
 class EmailNotifier:
     def __init__(self):
-        self.config = Config()
+        self.config = self._load_config()
+    
+    def _load_config(self) -> dict:
+        if CONFIG_FILE.exists():
+            with open(CONFIG_FILE) as f:
+                return json.load(f)
+        return {}
+    
+    def save_config(self, config: dict):
+        CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(CONFIG_FILE, 'w') as f:
+            json.dump(config, f, indent=2)
     
     def send(self, subject: str, html_body: str):
-        if not self.config.is_configured():
-            print("Email not configured. Set SMTP_HOST, EMAIL_FROM, EMAIL_PASSWORD, EMAIL_TO secrets.")
+        if not all([self.config.get('smtp_host'), self.config.get('smtp_port'), 
+                    self.config.get('email_from'), self.config.get('email_to'), 
+                    self.config.get('email_password')]):
+            print("Email not configured. Run: python3 server_status.py configure")
             return False
         
         try:
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
-            msg['From'] = self.config.email_from
-            msg['To'] = self.config.email_to
+            msg['From'] = self.config['email_from']
+            msg['To'] = self.config['email_to']
             msg.attach(MIMEText(html_body, 'html'))
             
-            with smtplib.SMTP(self.config.host, self.config.port) as server:
+            with smtplib.SMTP(self.config['smtp_host'], self.config['smtp_port']) as server:
                 server.starttls()
-                server.login(self.config.email_from, self.config.email_password)
+                server.login(self.config['email_from'], self.config['email_password'])
                 server.send_message(msg)
             
-            print(f"Email sent to {self.config.email_to}")
+            print(f"Email sent to {self.config['email_to']}")
             return True
         except Exception as e:
             print(f"Failed to send email: {e}")
@@ -65,15 +68,17 @@ class StatusChecker:
     BASE_URL = "https://metastatus.com/whatsapp-business-api"
     
     def check(self) -> StatusData:
-        import requests
-        
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
         try:
-            response = requests.get(self.BASE_URL, headers=headers, timeout=30)
-            html = response.text
+            import urllib.request
+            req = urllib.request.Request(self.BASE_URL, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as response:
+                html = response.read().decode('utf-8')
         except Exception as e:
-            print(f"Request failed: {e}")
+            print(f"HTTP request failed: {e}")
             return None
         
         overall = "unknown"
@@ -204,8 +209,6 @@ class StatusMonitor:
                     <p style="margin: 0; color: #666; font-size: 12px;">
                         Source: <a href="https://metastatus.com/whatsapp-business-api" style="color: #0084ff;">
                         metastatus.com/whatsapp-business-api</a>
-                        <br>
-                        Powered by GitHub Actions
                     </p>
                 </div>
             </div>
@@ -255,6 +258,28 @@ class StatusMonitor:
         self.save_state(current)
         return len(changes) > 0
 
+def configure():
+    config = {}
+    
+    print("\nEmail Configuration")
+    print("="*50)
+    
+    config['smtp_host'] = input("SMTP Host (gmail=smtp.gmail.com): ").strip() or "smtp.gmail.com"
+    config['smtp_port'] = int(input("SMTP Port (587): ").strip() or "587")
+    config['email_from'] = input("From email: ").strip()
+    config['email_password'] = input("App Password: ").strip()
+    config['email_to'] = input("To email: ").strip() or config['email_from']
+    
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump(config, f, indent=2)
+    
+    print("Configured!")
+
 if __name__ == "__main__":
-    monitor = StatusMonitor()
-    monitor.run()
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == 'configure':
+        configure()
+    else:
+        monitor = StatusMonitor()
+        monitor.run()
