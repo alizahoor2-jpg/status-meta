@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.env
+*.log
+page_debug.html
+*.plist
+*.sh.DS_Store
