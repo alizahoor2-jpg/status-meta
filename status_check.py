@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Business API Status Monitor
-Sends email ONLY when status changes (not every run)
+Sends email ONLY when status changes
 Uses Playwright to fetch JavaScript-rendered page
 """
 
@@ -15,7 +15,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass
 
-STATE_FILE = Path("/tmp/whatsapp_state.json")
+STATE_FILE = Path("state.json")
 
 @dataclass
 class ComponentStatus:
@@ -67,20 +67,15 @@ class StatusChecker:
             browser.close()
         
         overall_status = "unknown"
-        overall_details = ""
         
         if 'no_known_issues' in html:
             overall_status = "Operational"
-            overall_details = "The service is up and running with no known issues"
         elif 'partial_outage' in html:
             overall_status = "Partial Outage"
-            overall_details = "Some components are experiencing issues"
         elif 'major_outage' in html:
             overall_status = "Major Outage"
-            overall_details = "Major service disruption"
         elif 'degraded_performance' in html:
             overall_status = "Degraded"
-            overall_details = "Service experiencing slowness"
         
         date_match = re.search(r'Updated\s+([A-Za-z]+ \d+ \d+ \d+:\d+\s+[AP]M\s+[A-Za-z0-9+]+)', html)
         last_updated = date_match.group(1) if date_match else datetime.now().strftime("%b %d %Y %I:%M %p GMT+5")
@@ -138,11 +133,10 @@ class StatusMonitor:
             "timestamp": last_updated,
             "components": {c.name: c.status for c in components}
         }
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(STATE_FILE, 'w') as f:
             json.dump(data, f)
     
-    def format_email(self, last_updated, changes, all_components):
+    def format_email(self, last_updated, changes):
         subject = f"🔔 WhatsApp Business API Status Update - {len(changes)} change(s)"
         
         rows = []
@@ -151,7 +145,6 @@ class StatusMonitor:
             new_status = change['new_status']
             old_status = change['old_status']
             status_color = self.status_color(new_status)
-            
             new_details = change['new_details']
             
             rows.append(f"""
@@ -159,12 +152,10 @@ class StatusMonitor:
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee;">
                     <strong>{comp}</strong>
                 </td>
-                <td style="padding: 12px 15px; border-bottom: 1px solid #eee; 
-                          color: #888; text-decoration: line-through;">
+                <td style="padding: 12px 15px; border-bottom: 1px solid #eee; color: #888;">
                     {old_status}
                 </td>
-                <td style="padding: 12px 15px; border-bottom: 1px solid #eee; 
-                          color: {status_color}; font-weight: bold;">
+                <td style="padding: 12px 15px; border-bottom: 1px solid #eee; color: {status_color}; font-weight: bold;">
                     {new_status}
                 </td>
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee;">
@@ -176,17 +167,12 @@ class StatusMonitor:
         html = f"""
         <!DOCTYPE html>
         <html>
-        <body style="margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
-                    background: #f5f5f5;">
-            <div style="max-width: 700px; margin: 0 auto; background: white; border-radius: 8px; 
-                        box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
+        <body style="margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5;">
+            <div style="max-width: 700px; margin: 0 auto; background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
                 <div style="background: linear-gradient(135deg, #e74c3c, #c0392b); padding: 25px;">
                     <h1 style="color: white; margin: 0; font-size: 20px;">🔔 Status Change Detected</h1>
-                    <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">
-                        {last_updated} • {len(changes)} change(s)
-                    </p>
+                    <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">{last_updated} • {len(changes)} change(s)</p>
                 </div>
-                
                 <div style="padding: 20px;">
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
@@ -200,13 +186,10 @@ class StatusMonitor:
                         <tbody>{''.join(rows)}</tbody>
                     </table>
                 </div>
-                
                 <div style="padding: 15px 20px; background: #f8f9fa; border-top: 1px solid #eee;">
                     <p style="margin: 0; color: #666; font-size: 12px;">
-                        Source: <a href="https://metastatus.com/whatsapp-business-api" style="color: #0084ff;">
-                        metastatus.com/whatsapp-business-api</a>
-                        <br>
-                        Powered by GitHub Actions + cron-job.org (every 5 min)
+                        Source: <a href="https://metastatus.com/whatsapp-business-api" style="color: #0084ff;">metastatus.com/whatsapp-business-api</a>
+                        <br>Powered by GitHub Actions + cron-job.org (every 5 min)
                     </p>
                 </div>
             </div>
@@ -225,7 +208,7 @@ class StatusMonitor:
         return "#95a5a6"
     
     def run(self):
-        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Checking WhatsApp Business API...")
+        print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Checking...")
         
         last_updated, current_components = self.checker.check()
         
@@ -238,8 +221,8 @@ class StatusMonitor:
         
         changes = []
         for comp in current_components:
-            old_status = old_components.get(comp.name, "unknown")
-            if old_status != comp.status:
+            old_status = old_components.get(comp.name)
+            if old_status and old_status != comp.status:
                 changes.append({
                     "component": comp.name,
                     "old_status": old_status,
@@ -248,11 +231,11 @@ class StatusMonitor:
                 })
         
         if changes:
-            subject, html = self.format_email(last_updated, changes, current_components)
+            subject, html = self.format_email(last_updated, changes)
             self.notifier.send(subject, html)
-            print(f"Status changed! Sending email with {len(changes)} update(s)")
+            print(f"Changed! Email sent: {len(changes)} update(s)")
         else:
-            print("No changes detected")
+            print("No changes - no email")
         
         self.save_state(last_updated, current_components)
         
