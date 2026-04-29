@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Business API Status Monitor
-Runs via GitHub Actions (every 30 min) - sends email only on status changes.
+Sends email with full status dump every run (for testing)
 """
 
 import json
@@ -15,47 +15,35 @@ from email.mime.multipart import MIMEMultipart
 from dataclasses import dataclass
 
 STATE_FILE = Path("/tmp/whatsapp_state.json")
-CONFIG_FILE = Path("/tmp/whatsapp_config.json")
 
 @dataclass
-class StatusData:
-    timestamp: str
-    overall: str
-    components: dict
-
-class Config:
-    def __init__(self):
-        self.host = os.environ.get('SMTP_HOST') or 'smtp.gmail.com'
-        self.port = int(os.environ.get('SMTP_PORT') or '587')
-        self.email_from = os.environ.get('EMAIL_FROM') or 'mohdalizahoor@gmail.com'
-        self.email_password = os.environ.get('EMAIL_PASSWORD') or 'qlwb lerb nwom owna'
-        self.email_to = os.environ.get('EMAIL_TO') or 'mohdalizahoor@gmail.com'
-    
-    def is_configured(self):
-        return all([self.host, self.email_from, self.email_password, self.email_to])
+class ComponentStatus:
+    name: str
+    status: str
+    details: str
 
 class EmailNotifier:
     def __init__(self):
-        self.config = Config()
+        self.email_from = 'mohdalizahoor@gmail.com'
+        self.email_password = 'qlwb lerb nwom owna'
+        self.email_to = 'mohdalizahoor@gmail.com'
+        self.smtp_host = 'smtp.gmail.com'
+        self.smtp_port = 587
     
     def send(self, subject: str, html_body: str):
-        if not self.config.is_configured():
-            print("Email not configured. Set SMTP_HOST, EMAIL_FROM, EMAIL_PASSWORD, EMAIL_TO secrets.")
-            return False
-        
         try:
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
-            msg['From'] = self.config.email_from
-            msg['To'] = self.config.email_to
+            msg['From'] = self.email_from
+            msg['To'] = self.email_to
             msg.attach(MIMEText(html_body, 'html'))
             
-            with smtplib.SMTP(self.config.host, self.config.port) as server:
+            with smtplib.SMTP(self.smtp_host, self.smtp_port) as server:
                 server.starttls()
-                server.login(self.config.email_from, self.config.email_password)
+                server.login(self.email_from, self.email_password)
                 server.send_message(msg)
             
-            print(f"Email sent to {self.config.email_to}")
+            print(f"Email sent to {self.email_to}")
             return True
         except Exception as e:
             print(f"Failed to send email: {e}")
@@ -64,7 +52,7 @@ class EmailNotifier:
 class StatusChecker:
     BASE_URL = "https://metastatus.com/whatsapp-business-api"
     
-    def check(self) -> StatusData:
+    def check(self):
         import requests
         
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -74,97 +62,95 @@ class StatusChecker:
             html = response.text
         except Exception as e:
             print(f"Request failed: {e}")
-            return None
+            return None, None
         
-        overall = "unknown"
+        overall_status = "unknown"
+        overall_details = ""
+        
         if 'no_known_issues' in html:
-            overall = "operational"
+            overall_status = "Operational"
+            overall_details = "The service is up and running with no known issues"
         elif 'partial_outage' in html:
-            overall = "partial_outage"
+            overall_status = "Partial Outage"
+            overall_details = "Some components are experiencing issues"
         elif 'major_outage' in html:
-            overall = "major_outage"
+            overall_status = "Major Outage"
+            overall_details = "Major service disruption"
         elif 'degraded_performance' in html:
-            overall = "degraded"
+            overall_status = "Degraded"
+            overall_details = "Service experiencing slowness"
+        
+        date_match = re.search(r'Updated\s+([A-Za-z]+ \d+ \d+ \d+:\d+\s+[AP]M\s+[A-Za-z0-9+]+)', html)
+        last_updated = date_match.group(1) if date_match else ""
         
         services = re.findall(r'<p class="[^"]*_serviceName[^"]*">([^<]+)</p>', html)
-        status_icons = [s for s in re.findall(r'alt="([^"]+)"', html) if 'icon' in s.lower()]
+        status_icons = re.findall(r'alt="([^"]+)"', html)
         
-        components = {}
+        status_descriptions = {
+            'no known issues': 'The service is up and running with no known issues',
+            'degraded': 'Service is experiencing degraded performance',
+            'partial': 'Some users may experience issues',
+            'major': 'Service is experiencing a major outage',
+            'outage': 'Service is currently down'
+        }
+        
+        components = []
         for i, service in enumerate(services):
             service = service.strip()
             if service:
-                status = "operational"
-                if i < len(status_icons):
-                    alt = status_icons[i].lower()
-                    if 'no known' in alt:
-                        status = "operational"
-                    elif 'degraded' in alt:
-                        status = "degraded"
-                    elif 'partial' in alt:
-                        status = "partial_outage"
-                    elif 'outage' in alt or 'major' in alt:
-                        status = "major_outage"
-                    elif 'maintenance' in alt:
-                        status = "maintenance"
+                status = "Operational"
+                details = "The service is up and running with no known issues"
                 
-                components[service] = status
+                icon_idx = i
+                if icon_idx < len(status_icons):
+                    icon = status_icons[icon_idx].lower()
+                    if 'no known' in icon:
+                        status = "Operational"
+                        details = "The service is up and running with no known issues"
+                    elif 'degraded' in icon:
+                        status = "Degraded"
+                        details = "Service is experiencing degraded performance"
+                    elif 'partial' in icon:
+                        status = "Partial Outage"
+                        details = "Some users may experience issues"
+                    elif 'major' in icon or 'outage' in icon:
+                        status = "Major Outage"
+                        details = "Service is currently down"
+                    elif 'maintenance' in icon:
+                        status = "Maintenance"
+                        details = "Service is under maintenance"
+                
+                components.append(ComponentStatus(
+                    name=service,
+                    status=status,
+                    details=details
+                ))
         
-        return StatusData(
-            timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S UTC"),
-            overall=overall,
-            components=components
-        )
+        return last_updated, components
 
 class StatusMonitor:
     def __init__(self):
         self.checker = StatusChecker()
         self.notifier = EmailNotifier()
     
-    def load_last_state(self) -> StatusData:
-        if STATE_FILE.exists():
-            with open(STATE_FILE) as f:
-                data = json.load(f)
-                return StatusData(
-                    timestamp=data.get('timestamp', ''),
-                    overall=data.get('overall', 'unknown'),
-                    components=data.get('components', {})
-                )
-        return StatusData(timestamp='', overall='', components={})
-    
-    def save_state(self, data: StatusData):
-        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(STATE_FILE, 'w') as f:
-            json.dump({
-                'timestamp': data.timestamp,
-                'overall': data.overall,
-                'components': data.components
-            }, f, indent=2)
-    
-    def format_email(self, current: StatusData, changes: list, old_overall: str) -> tuple:
-        if not changes:
-            return None, None
-        
-        emoji = "🔴" if any('outage' in c['new'].lower() or 'major' in c['new'].lower() for c in changes) else \
-                "🟡" if any('degraded' in c['new'].lower() for c in changes) else "✅"
-        
-        subject = f"{emoji} WhatsApp Business API: {len(changes)} change(s)"
-        if old_overall != current.overall:
-            subject += f" ({old_overall} → {current.overall})"
+    def format_email(self, last_updated, components):
+        subject = f"WhatsApp Business API Status - {datetime.now().strftime('%b %d %H:%M')}"
         
         rows = []
-        for c in changes:
-            status_emoji = "✅" if 'operational' in c['new'].lower() else \
-                          "🔴" if 'outage' in c['new'].lower() or 'major' in c['new'].lower() else \
-                          "🟡" if 'degraded' in c['new'].lower() or 'partial' in c['new'].lower() else "🔧"
+        for comp in components:
+            status_color = self.status_color(comp.status)
             rows.append(f"""
             <tr>
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee;">
-                    <strong>{status_emoji} {c['component']}</strong>
+                    <strong>{comp.name}</strong>
                 </td>
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee; 
-                          color: {self.status_color(c['old'])};">{c['old']}</td>
-                <td style="padding: 12px 15px; border-bottom: 1px solid #eee; 
-                          color: {self.status_color(c['new'])}; font-weight: bold;">{c['new']}</td>
+                          color: {status_color}; font-weight: bold;">
+                    {comp.status}
+                </td>
+                <td style="padding: 12px 15px; border-bottom: 1px solid #eee;">
+                    {comp.details}
+                </td>
             </tr>
             """)
         
@@ -173,27 +159,22 @@ class StatusMonitor:
         <html>
         <body style="margin: 0; padding: 20px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; 
                     background: #f5f5f5;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 8px; 
+            <div style="max-width: 700px; margin: 0 auto; background: white; border-radius: 8px; 
                         box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
                 <div style="background: linear-gradient(135deg, #0084ff, #00a1ff); padding: 25px;">
-                    <h1 style="color: white; margin: 0; font-size: 20px;">🔔 WhatsApp Business API Status Change</h1>
+                    <h1 style="color: white; margin: 0; font-size: 20px;">📊 WhatsApp Business API Status</h1>
                     <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">
-                        {current.timestamp}
+                        {last_updated}
                     </p>
                 </div>
                 
-                {f'<div style="background: #fff3cd; padding: 15px; margin: 15px; border-radius: 5px; border-left: 4px solid #ffc107;">'
-                 f'<strong>Overall Status:</strong> {old_overall} → <strong>{current.overall}</strong></div>' 
-                 if old_overall != current.overall else ''}
-                
                 <div style="padding: 20px;">
-                    <h3 style="margin: 0 0 15px; color: #333;">Changed Components</h3>
                     <table style="width: 100%; border-collapse: collapse;">
                         <thead>
                             <tr style="background: #f8f9fa;">
-                                <th style="padding: 10px; text-align: left;">Component</th>
-                                <th style="padding: 10px; text-align: left;">Previous</th>
-                                <th style="padding: 10px; text-align: left;">Current</th>
+                                <th style="padding: 12px; text-align: left;">Type</th>
+                                <th style="padding: 12px; text-align: left;">Status</th>
+                                <th style="padding: 12px; text-align: left;">Details</th>
                             </tr>
                         </thead>
                         <tbody>{''.join(rows)}</tbody>
@@ -215,7 +196,7 @@ class StatusMonitor:
         
         return subject, html
     
-    def status_color(self, status: str) -> str:
+    def status_color(self, status):
         s = status.lower()
         if 'operational' in s: return "#27ae60"
         if 'outage' in s or 'major' in s: return "#e74c3c"
@@ -223,37 +204,22 @@ class StatusMonitor:
         if 'maintenance' in s: return "#3498db"
         return "#95a5a6"
     
-    def run(self) -> bool:
+    def run(self):
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Checking WhatsApp Business API...")
         
-        current = self.checker.check()
-        if not current:
+        last_updated, components = self.checker.check()
+        
+        if not components:
             print("Failed to fetch status")
             return False
         
-        last = self.load_last_state()
-        changes = []
+        subject, html = self.format_email(last_updated, components)
         
-        if last.overall and last.overall != current.overall:
-            changes.append({'component': 'Overall Status', 'old': last.overall, 'new': current.overall})
+        self.notifier.send(subject, html)
         
-        for name, status in current.components.items():
-            if name in last.components:
-                if last.components[name] != status:
-                    changes.append({'component': name, 'old': last.components[name], 'new': status})
-            else:
-                changes.append({'component': name, 'old': 'new', 'new': status})
+        print(f"Sent status update with {len(components)} components")
         
-        if changes:
-            subject, html = self.format_email(current, changes, last.overall)
-            if subject and html:
-                self.notifier.send(subject, html)
-                print(f"Change detected: {len(changes)} update(s)")
-        else:
-            print("No changes - all systems operational")
-        
-        self.save_state(current)
-        return len(changes) > 0
+        return True
 
 if __name__ == "__main__":
     monitor = StatusMonitor()
