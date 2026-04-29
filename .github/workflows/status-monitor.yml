@@ -3,6 +3,8 @@ name: WhatsApp Business API Status Monitor
 on:
   schedule:
     - cron: '*/10 * * * *'
+  repository_dispatch:
+    types: [cron-job]
   workflow_dispatch:
 
 jobs:
