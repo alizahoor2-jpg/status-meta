@@ -10,10 +10,13 @@ on:
 jobs:
   check-status:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -27,11 +30,3 @@ jobs:
 
       - name: Run status check
         run: python status_check.py
-
-      - name: Save state
-        run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add state.json
-          git diff --cached --quiet || git commit -m "Update state"
-          git push
