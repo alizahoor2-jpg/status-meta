@@ -2,6 +2,7 @@
 """
 WhatsApp Business API Status Monitor
 Sends email with full status dump every run (for testing)
+Uses Playwright to fetch JavaScript-rendered page
 """
 
 import json
@@ -52,17 +53,22 @@ class EmailNotifier:
 class StatusChecker:
     BASE_URL = "https://metastatus.com/whatsapp-business-api"
     
+    def __init__(self):
+        self.playwright = None
+        self.browser = None
+    
     def check(self):
-        import requests
+        from playwright.sync_api import sync_playwright
         
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        
-        try:
-            response = requests.get(self.BASE_URL, headers=headers, timeout=30)
-            html = response.text
-        except Exception as e:
-            print(f"Request failed: {e}")
-            return None, None
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            
+            page.goto(self.BASE_URL, wait_until='networkidle', timeout=30000)
+            page.wait_for_timeout(2000)
+            
+            html = page.evaluate('() => document.getElementById("root").innerHTML')
+            browser.close()
         
         overall_status = "unknown"
         overall_details = ""
@@ -81,18 +87,11 @@ class StatusChecker:
             overall_details = "Service experiencing slowness"
         
         date_match = re.search(r'Updated\s+([A-Za-z]+ \d+ \d+ \d+:\d+\s+[AP]M\s+[A-Za-z0-9+]+)', html)
-        last_updated = date_match.group(1) if date_match else ""
+        last_updated = date_match.group(1) if date_match else datetime.now().strftime("%b %d %Y %I:%M %p GMT+5")
         
         services = re.findall(r'<p class="[^"]*_serviceName[^"]*">([^<]+)</p>', html)
         status_icons = re.findall(r'alt="([^"]+)"', html)
-        
-        status_descriptions = {
-            'no known issues': 'The service is up and running with no known issues',
-            'degraded': 'Service is experiencing degraded performance',
-            'partial': 'Some users may experience issues',
-            'major': 'Service is experiencing a major outage',
-            'outage': 'Service is currently down'
-        }
+        relevant_icons = [s for s in status_icons if 'icon' in s.lower()]
         
         components = []
         for i, service in enumerate(services):
@@ -101,9 +100,8 @@ class StatusChecker:
                 status = "Operational"
                 details = "The service is up and running with no known issues"
                 
-                icon_idx = i
-                if icon_idx < len(status_icons):
-                    icon = status_icons[icon_idx].lower()
+                if i < len(relevant_icons):
+                    icon = relevant_icons[i].lower()
                     if 'no known' in icon:
                         status = "Operational"
                         details = "The service is up and running with no known issues"
@@ -186,7 +184,7 @@ class StatusMonitor:
                         Source: <a href="https://metastatus.com/whatsapp-business-api" style="color: #0084ff;">
                         metastatus.com/whatsapp-business-api</a>
                         <br>
-                        Powered by GitHub Actions
+                        Powered by GitHub Actions (every 5 min)
                     </p>
                 </div>
             </div>

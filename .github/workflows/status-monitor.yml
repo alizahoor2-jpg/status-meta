@@ -16,8 +16,10 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install dependencies
-        run: pip install beautifulsoup4 requests
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install chromium
 
       - name: Run status check
         run: python status_check.py
