@@ -184,7 +184,7 @@ class StatusMonitor:
                         Source: <a href="https://metastatus.com/whatsapp-business-api" style="color: #0084ff;">
                         metastatus.com/whatsapp-business-api</a>
                         <br>
-                        Powered by GitHub Actions (every 5 min)
+                        Powered by GitHub Actions (every 10 min)
                     </p>
                 </div>
             </div>
