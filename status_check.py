@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 WhatsApp Business API Status Monitor
-Sends email with full status dump every run (for testing)
+Sends email ONLY when status changes (not every run)
 Uses Playwright to fetch JavaScript-rendered page
 """
 
@@ -52,10 +52,6 @@ class EmailNotifier:
 
 class StatusChecker:
     BASE_URL = "https://metastatus.com/whatsapp-business-api"
-    
-    def __init__(self):
-        self.playwright = None
-        self.browser = None
     
     def check(self):
         from playwright.sync_api import sync_playwright
@@ -131,23 +127,48 @@ class StatusMonitor:
         self.checker = StatusChecker()
         self.notifier = EmailNotifier()
     
-    def format_email(self, last_updated, components):
-        subject = f"WhatsApp Business API Status - {datetime.now().strftime('%b %d %H:%M')}"
+    def load_state(self):
+        if STATE_FILE.exists():
+            with open(STATE_FILE) as f:
+                return json.load(f)
+        return {"timestamp": "", "components": {}}
+    
+    def save_state(self, last_updated, components):
+        data = {
+            "timestamp": last_updated,
+            "components": {c.name: c.status for c in components}
+        }
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(STATE_FILE, 'w') as f:
+            json.dump(data, f)
+    
+    def format_email(self, last_updated, changes, all_components, old_state):
+        subject = f"🔔 WhatsApp Business API Status Update - {len(changes)} change(s)"
         
         rows = []
-        for comp in components:
-            status_color = self.status_color(comp.status)
+        for change in changes:
+            comp = change['component']
+            new_status = change['new_status']
+            old_status = change['old_status']
+            status_color = self.status_color(new_status)
+            
+            new_details = change['new_details']
+            
             rows.append(f"""
             <tr>
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee;">
-                    <strong>{comp.name}</strong>
+                    <strong>{comp}</strong>
+                </td>
+                <td style="padding: 12px 15px; border-bottom: 1px solid #eee; 
+                          color: #888; text-decoration: line-through;">
+                    {old_status}
                 </td>
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee; 
                           color: {status_color}; font-weight: bold;">
-                    {comp.status}
+                    {new_status}
                 </td>
                 <td style="padding: 12px 15px; border-bottom: 1px solid #eee;">
-                    {comp.details}
+                    {new_details}
                 </td>
             </tr>
             """)
@@ -159,10 +180,10 @@ class StatusMonitor:
                     background: #f5f5f5;">
             <div style="max-width: 700px; margin: 0 auto; background: white; border-radius: 8px; 
                         box-shadow: 0 2px 10px rgba(0,0,0,0.1); overflow: hidden;">
-                <div style="background: linear-gradient(135deg, #0084ff, #00a1ff); padding: 25px;">
-                    <h1 style="color: white; margin: 0; font-size: 20px;">📊 WhatsApp Business API Status</h1>
+                <div style="background: linear-gradient(135deg, #e74c3c, #c0392b); padding: 25px;">
+                    <h1 style="color: white; margin: 0; font-size: 20px;">🔔 Status Change Detected</h1>
                     <p style="color: rgba(255,255,255,0.9); margin: 10px 0 0;">
-                        {last_updated}
+                        {last_updated} • {len(changes)} change(s)
                     </p>
                 </div>
                 
@@ -171,7 +192,8 @@ class StatusMonitor:
                         <thead>
                             <tr style="background: #f8f9fa;">
                                 <th style="padding: 12px; text-align: left;">Type</th>
-                                <th style="padding: 12px; text-align: left;">Status</th>
+                                <th style="padding: 12px; text-align: left;">Previous</th>
+                                <th style="padding: 12px; text-align: left;">Current</th>
                                 <th style="padding: 12px; text-align: left;">Details</th>
                             </tr>
                         </thead>
@@ -184,7 +206,7 @@ class StatusMonitor:
                         Source: <a href="https://metastatus.com/whatsapp-business-api" style="color: #0084ff;">
                         metastatus.com/whatsapp-business-api</a>
                         <br>
-                        Powered by GitHub Actions (every 10 min)
+                        Powered by GitHub Actions + cron-job.org (every 5 min)
                     </p>
                 </div>
             </div>
@@ -205,19 +227,36 @@ class StatusMonitor:
     def run(self):
         print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Checking WhatsApp Business API...")
         
-        last_updated, components = self.checker.check()
+        last_updated, current_components = self.checker.check()
         
-        if not components:
+        if not current_components:
             print("Failed to fetch status")
             return False
         
-        subject, html = self.format_email(last_updated, components)
+        last_state = self.load_state()
+        old_components = last_state.get("components", {})
         
-        self.notifier.send(subject, html)
+        changes = []
+        for comp in current_components:
+            old_status = old_components.get(comp.name, "unknown")
+            if old_status != comp.status:
+                changes.append({
+                    "component": comp.name,
+                    "old_status": old_status,
+                    "new_status": comp.status,
+                    "new_details": comp.details
+                })
         
-        print(f"Sent status update with {len(components)} components")
+        if changes:
+            subject, html = self.format_email(last_updated, changes, current_components, old_state)
+            self.notifier.send(subject, html)
+            print(f"Status changed! Sending email with {len(changes)} update(s)")
+        else:
+            print("No changes detected")
         
-        return True
+        self.save_state(last_updated, current_components)
+        
+        return len(changes) > 0
 
 if __name__ == "__main__":
     monitor = StatusMonitor()
