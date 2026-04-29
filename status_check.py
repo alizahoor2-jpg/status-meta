@@ -142,7 +142,7 @@ class StatusMonitor:
         with open(STATE_FILE, 'w') as f:
             json.dump(data, f)
     
-    def format_email(self, last_updated, changes, all_components, old_state):
+    def format_email(self, last_updated, changes, all_components):
         subject = f"🔔 WhatsApp Business API Status Update - {len(changes)} change(s)"
         
         rows = []
@@ -248,7 +248,7 @@ class StatusMonitor:
                 })
         
         if changes:
-            subject, html = self.format_email(last_updated, changes, current_components, old_state)
+            subject, html = self.format_email(last_updated, changes, current_components)
             self.notifier.send(subject, html)
             print(f"Status changed! Sending email with {len(changes)} update(s)")
         else:
