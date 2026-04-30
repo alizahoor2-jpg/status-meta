@@ -222,10 +222,19 @@ class StatusMonitor:
         changes = []
         for comp in current_components:
             old_status = old_components.get(comp.name)
-            if old_status and old_status != comp.status:
+            # Send email if status changed OR if it's a new component
+            if old_status is not None and old_status != comp.status:
                 changes.append({
                     "component": comp.name,
                     "old_status": old_status,
+                    "new_status": comp.status,
+                    "new_details": comp.details
+                })
+            # Also detect new components not in previous state
+            elif old_status is None:
+                changes.append({
+                    "component": comp.name,
+                    "old_status": "no data",
                     "new_status": comp.status,
                     "new_details": comp.details
                 })

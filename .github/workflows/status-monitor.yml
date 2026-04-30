@@ -30,9 +30,12 @@ jobs:
       - name: Run status check
         run: python status_check.py
 
-      - name: Commit state
+      - name: Save state
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add state.json
-          git diff --cached --quiet || (git commit -m "Update state" && git push)
+          if ! git diff --cached --quiet; then
+            git commit -m "Update state"
+            git push
+          fi
